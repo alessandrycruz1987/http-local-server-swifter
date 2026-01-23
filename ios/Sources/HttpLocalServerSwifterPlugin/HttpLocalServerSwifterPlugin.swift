@@ -2,22 +2,67 @@ import Foundation
 import Capacitor
 
 /**
- * Please read the Capacitor iOS Plugin Development Guide
- * here: https://capacitorjs.com/docs/plugins/ios
- */
+* Capacitor plugin for running a local HTTP server on the device.
+* Allows receiving HTTP requests and sending responses from JavaScript.
+*/
 @objc(HttpLocalServerSwifterPlugin)
-public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin {
+public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLocalServerSwifterDelegate {
+    
     public let identifier = "HttpLocalServerSwifterPlugin"
     public let jsName = "HttpLocalServerSwifter"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "echo", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "connect", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "sendResponse", returnType: CAPPluginReturnPromise)
     ]
-    private let implementation = HttpLocalServerSwifter()
-
-    @objc func echo(_ call: CAPPluginCall) {
-        let value = call.getString("value") ?? ""
-        call.resolve([
-            "value": implementation.echo(value)
-        ])
+    
+    private var localServer: HttpLocalServerSwifter?
+    
+    /**
+    * Starts the local HTTP server.
+    * @return ip: The server's IP address
+    * @return port: The port the server is listening on
+    */
+    @objc func connect(_ call: CAPPluginCall) {
+        if localServer == nil {
+            localServer = HttpLocalServerSwifter(delegate: self)
+        }
+        localServer?.connect(call)
+    }
+    
+    /**
+    * Stops the local HTTP server.
+    * Cleans up all resources and pending requests.
+    */
+    @objc func disconnect(_ call: CAPPluginCall) {
+        if localServer != nil {
+            localServer?.disconnect(call)
+        } else {
+            call.resolve()
+        }
+    }
+    
+    /**
+    * Sends a response back to the client that made the request.
+    * @param requestId Unique request ID (received in 'onRequest')
+    * @param body Response body (typically stringified JSON)
+    */
+    @objc func sendResponse(_ call: CAPPluginCall) {
+        guard let requestId = call.getString("requestId") else {
+            call.reject("Missing requestId")
+            return
+        }
+        
+        guard let body = call.getString("body") else {
+            call.reject("Missing body")
+            return
+        }
+        
+        HttpLocalServerSwifter.handleJsResponse(requestId: requestId, body: body)
+        call.resolve()
+    }
+    
+    public func httpLocalServerSwifterDidReceiveRequest(_ data: [String: Any]) {
+        notifyListeners("onRequest", data: data)
     }
 }
