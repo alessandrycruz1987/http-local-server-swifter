@@ -1,4 +1,4 @@
-# @cappitolian/http-local-server
+# @cappitolian/http-local-server-swifter
 
 A Capacitor plugin to run a local HTTP server on your device, allowing you to receive and respond to HTTP requests directly from Angular/JavaScript.
 
@@ -17,7 +17,7 @@ A Capacitor plugin to run a local HTTP server on your device, allowing you to re
 
 ## Installation
 ```bash
-npm install @cappitolian/http-local-server
+npm install @cappitolian/http-local-server-swifter
 npx cap sync
 ```
 
@@ -27,7 +27,7 @@ npx cap sync
 
 ### Import
 ```typescript
-import { HttpLocalServerSwifter } from '@cappitolian/http-local-server';
+import { HttpLocalServerSwifter } from '@cappitolian/http-local-server-swifter';
 ```
 
 ### Listen and Respond
