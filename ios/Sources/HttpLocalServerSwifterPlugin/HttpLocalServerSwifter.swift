@@ -92,7 +92,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     private func setupHandlers() {
         guard let server = webServer else { return }
         
-        // Catch-all handler for all HTTP methods
+        // Catch-all handler for all HTTP methods and paths
         server["/(.*)"] = { [weak self] request in
             guard let self = self else {
                 return self?.errorResponse() ?? .internalServerError
@@ -168,58 +168,81 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     }
     
     private func extractBody(from request: HttpRequest) -> String? {
-        guard let bodyBytes = request.body else {
+        // request.body ya es [UInt8], no es opcional
+        let bodyBytes = request.body
+    
+        guard !bodyBytes.isEmpty else {
             return nil
         }
-        
+    
         return String(bytes: bodyBytes, encoding: .utf8)
     }
     
     private func extractHeaders(from request: HttpRequest) -> [String: String] {
-        return request.headers
+        // Swifter headers es [(String, String)], convertir a [String: String]
+        var headersDict: [String: String] = [:]
+        for (key, value) in request.headers {
+            headersDict[key] = value
+        }
+        return headersDict
     }
     
     private func extractQuery(from request: HttpRequest) -> [String: String] {
-        return request.queryParams
+    // request.queryParams también es [(String, String)]
+        var queryDict: [String: String] = [:]
+        for (key, value) in request.queryParams {
+            queryDict[key] = value
+        }
+        return queryDict
     }
     
     private func createJsonResponse(_ body: String, statusCode: Int = 200) -> HttpResponse {
-        var response: HttpResponse
-        
-        switch statusCode {
-        case 200:
-            response = .ok(.text(body))
-        case 204:
-            response = HttpResponse.raw(204, "No Content", [:], nil)
-        case 408:
-            response = HttpResponse.raw(408, "Request Timeout", [:], { writer in
-                try writer.write([UInt8](body.utf8))
-            })
-        case 500:
-            response = .internalServerError
-        default:
-            response = HttpResponse.raw(statusCode, "Custom Status", [:], { writer in
-                try writer.write([UInt8](body.utf8))
-            })
-        }
-        
-        // Add CORS headers
-        return response.withHeaders([
+        let headers: [String: String] = [
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             "Access-Control-Allow-Headers": "Origin, Content-Type, Accept, Authorization",
             "Access-Control-Allow-Credentials": "true",
             "Access-Control-Max-Age": "3600"
-        ])
+        ]
+        
+        let bodyData = [UInt8](body.utf8)
+        
+        return HttpResponse.raw(statusCode, statusDescription(for: statusCode), headers) { writer in
+            try writer.write(bodyData)
+        }
     }
     
     private func corsResponse() -> HttpResponse {
-        return createJsonResponse("{}", statusCode: 204)
+        let headers: [String: String] = [
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Origin, Content-Type, Accept, Authorization",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "3600"
+        ]
+        
+        return HttpResponse.raw(204, "No Content", headers, nil)
     }
     
     private func errorResponse() -> HttpResponse {
         return createJsonResponse("{\"error\":\"Server error\"}", statusCode: 500)
+    }
+    
+    private func statusDescription(for code: Int) -> String {
+        switch code {
+        case 200: return "OK"
+        case 201: return "Created"
+        case 202: return "Accepted"
+        case 204: return "No Content"
+        case 400: return "Bad Request"
+        case 401: return "Unauthorized"
+        case 403: return "Forbidden"
+        case 404: return "Not Found"
+        case 408: return "Request Timeout"
+        case 500: return "Internal Server Error"
+        default: return "Unknown"
+        }
     }
     
     private func startServer() throws {
@@ -288,119 +311,5 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
         }
         
         return address
-    }
-}
-
-// MARK: - HttpResponse Extension
-extension HttpResponse {
-    func withHeaders(_ headers: [String: String]) -> HttpResponse {
-        return HttpResponse.raw(self.statusCode(), self.reasonPhrase(), headers, { writer in
-            if let bodyData = try? self.content() {
-                try writer.write(bodyData)
-            }
-        })
-    }
-    
-    func statusCode() -> Int {
-        switch self {
-        case .ok: return 200
-        case .created: return 201
-        case .accepted: return 202
-        case .movedPermanently: return 301
-        case .notModified: return 304
-        case .badRequest: return 400
-        case .unauthorized: return 401
-        case .forbidden: return 403
-        case .notFound: return 404
-        case .internalServerError: return 500
-        case .raw(let code, _, _, _): return code
-        default: return 200
-        }
-    }
-    
-    func reasonPhrase() -> String {
-        switch self {
-        case .ok: return "OK"
-        case .created: return "Created"
-        case .accepted: return "Accepted"
-        case .movedPermanently: return "Moved Permanently"
-        case .notModified: return "Not Modified"
-        case .badRequest: return "Bad Request"
-        case .unauthorized: return "Unauthorized"
-        case .forbidden: return "Forbidden"
-        case .notFound: return "Not Found"
-        case .internalServerError: return "Internal Server Error"
-        case .raw(_, let phrase, _, _): return phrase
-        default: return "OK"
-        }
-    }
-    
-    func content() throws -> [UInt8] {
-        switch self {
-        case .ok(let body), .created(let body), .accepted(let body):
-            return try bodyToBytes(body)
-        case .badRequest(let body), .notFound(let body), .internalServerError:
-            if let body = body {
-                return try bodyToBytes(body)
-            }
-            return []
-        case .raw(_, _, _, let writer):
-            var data = [UInt8]()
-            let mockWriter = MockResponseWriter { bytes in
-                data.append(contentsOf: bytes)
-            }
-            try writer?(mockWriter)
-            return data
-        default:
-            return []
-        }
-    }
-    
-    private func bodyToBytes(_ body: HttpResponseBody) throws -> [UInt8] {
-        switch body {
-        case .text(let string):
-            return [UInt8](string.utf8)
-        case .html(let string):
-            return [UInt8](string.utf8)
-        case .json(let object):
-            let data = try JSONSerialization.data(withJSONObject: object)
-            return [UInt8](data)
-        case .data(let data, _):
-            return [UInt8](data)
-        case .custom(let writer):
-            var bytes = [UInt8]()
-            let mockWriter = MockResponseWriter { data in
-                bytes.append(contentsOf: data)
-            }
-            try writer(mockWriter)
-            return bytes
-        }
-    }
-}
-
-// MARK: - Mock Response Writer
-private class MockResponseWriter: HttpResponseBodyWriter {
-    let writeHandler: ([UInt8]) -> Void
-    
-    init(writeHandler: @escaping ([UInt8]) -> Void) {
-        self.writeHandler = writeHandler
-    }
-    
-    func write(_ data: [UInt8]) throws {
-        writeHandler(data)
-    }
-    
-    func write(_ data: ArraySlice<UInt8>) throws {
-        writeHandler(Array(data))
-    }
-    
-    func write(_ data: NSData) throws {
-        var bytes = [UInt8](repeating: 0, count: data.length)
-        data.getBytes(&bytes, length: data.length)
-        writeHandler(bytes)
-    }
-    
-    func write(_ data: Data) throws {
-        writeHandler([UInt8](data))
     }
 }

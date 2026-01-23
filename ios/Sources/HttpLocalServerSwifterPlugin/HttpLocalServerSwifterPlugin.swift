@@ -7,7 +7,7 @@ import Capacitor
 */
 @objc(HttpLocalServerSwifterPlugin)
 public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLocalServerSwifterDelegate {
-    
+    // MARK: - CAPBridgedPlugin Properties
     public let identifier = "HttpLocalServerSwifterPlugin"
     public let jsName = "HttpLocalServerSwifter"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -16,7 +16,10 @@ public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLoca
         CAPPluginMethod(name: "sendResponse", returnType: CAPPluginReturnPromise)
     ]
     
+    // MARK: - Properties
     private var localServer: HttpLocalServerSwifter?
+    
+    // MARK: - Plugin Methods
     
     /**
     * Starts the local HTTP server.
@@ -62,6 +65,12 @@ public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLoca
         call.resolve()
     }
     
+    // MARK: - HttpLocalServerSwifterDelegate
+    
+    /**
+    * Delegate method called when the server receives an HTTP request.
+    * Notifies JavaScript via the 'onRequest' event.
+    */
     public func httpLocalServerSwifterDidReceiveRequest(_ data: [String: Any]) {
         notifyListeners("onRequest", data: data)
     }
