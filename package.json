@@ -1,6 +1,6 @@
 {
   "name": "@cappitolian/http-local-server-swifter",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "description": "Runs a local HTTP server on your device, accessible over LAN. Supports connect, disconnect, GET, and POST methods with IP and port discovery.",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
@@ -19,7 +19,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alessandrycruz1987/http-local-server-swifter.git.git"
+    "url": "git+https://github.com/alessandrycruz1987/http-local-server-swifter.git"
   },
   "bugs": {
     "url": "https://github.com/alessandrycruz1987/http-local-server-swifter.git/issues"
@@ -46,10 +46,10 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.0.0",
-    "@capacitor/core": "^8.0.0",
+    "@capacitor/android": "^7.4.5",
+    "@capacitor/core": "^7.4.5",
     "@capacitor/docgen": "^0.3.1",
-    "@capacitor/ios": "^8.0.0",
+    "@capacitor/ios": "^7.4.5",
     "@ionic/eslint-config": "^0.4.0",
     "@ionic/prettier-config": "^4.0.0",
     "@ionic/swiftlint-config": "^2.0.0",
@@ -62,7 +62,7 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "@capacitor/core": ">=8.0.0"
+    "@capacitor/core": ">=7.0.0"
   },
   "prettier": "@ionic/prettier-config",
   "swiftlint": "@ionic/swiftlint-config",
