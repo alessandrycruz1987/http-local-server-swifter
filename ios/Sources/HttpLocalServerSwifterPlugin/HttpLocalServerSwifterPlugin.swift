@@ -1,10 +1,6 @@
 import Foundation
 import Capacitor
 
-/**
-* Capacitor plugin for running a local HTTP server on the device.
-* Allows receiving HTTP requests and sending responses from JavaScript.
-*/
 @objc(HttpLocalServerSwifterPlugin)
 public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLocalServerSwifterDelegate {
     // MARK: - CAPBridgedPlugin Properties
@@ -19,59 +15,56 @@ public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLoca
     // MARK: - Properties
     private var localServer: HttpLocalServerSwifter?
     
-    // MARK: - Plugin Methods
+    // MARK: - Lifecycle
+    public override func load() {
+        print("✅ HttpLocalServerSwifterPlugin: Plugin loaded")
+    }
     
-    /**
-    * Starts the local HTTP server.
-    * @return ip: The server's IP address
-    * @return port: The port the server is listening on
-    */
+    // MARK: - Plugin Methods
     @objc func connect(_ call: CAPPluginCall) {
+        print("📞 HttpLocalServerSwifterPlugin: connect() called")
+        
         if localServer == nil {
             localServer = HttpLocalServerSwifter(delegate: self)
+            print("✅ HttpLocalServerSwifterPlugin: Server instance created")
         }
+        
         localServer?.connect(call)
     }
     
-    /**
-    * Stops the local HTTP server.
-    * Cleans up all resources and pending requests.
-    */
     @objc func disconnect(_ call: CAPPluginCall) {
+        print("📞 HttpLocalServerSwifterPlugin: disconnect() called")
+        
         if localServer != nil {
             localServer?.disconnect(call)
+            localServer = nil
         } else {
             call.resolve()
         }
     }
     
-    /**
-    * Sends a response back to the client that made the request.
-    * @param requestId Unique request ID (received in 'onRequest')
-    * @param body Response body (typically stringified JSON)
-    */
     @objc func sendResponse(_ call: CAPPluginCall) {
         guard let requestId = call.getString("requestId") else {
+            print("❌ HttpLocalServerSwifterPlugin: Missing requestId")
             call.reject("Missing requestId")
             return
         }
         
         guard let body = call.getString("body") else {
+            print("❌ HttpLocalServerSwifterPlugin: Missing body")
             call.reject("Missing body")
             return
         }
         
+        print("📤 HttpLocalServerSwifterPlugin: sendResponse for requestId: \(requestId)")
         HttpLocalServerSwifter.handleJsResponse(requestId: requestId, body: body)
         call.resolve()
     }
     
     // MARK: - HttpLocalServerSwifterDelegate
-    
-    /**
-    * Delegate method called when the server receives an HTTP request.
-    * Notifies JavaScript via the 'onRequest' event.
-    */
     public func httpLocalServerSwifterDidReceiveRequest(_ data: [String: Any]) {
+        print("📨 HttpLocalServerSwifterPlugin: Received request, notifying listeners")
+        print("   Request data: \(data)")
         notifyListeners("onRequest", data: data)
     }
 }

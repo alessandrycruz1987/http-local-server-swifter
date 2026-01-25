@@ -16,7 +16,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     private static var pendingResponses = [String: (String) -> Void]()
     private static let queue = DispatchQueue(label: "com.cappitolian.HttpLocalServerSwifter.pendingResponses", qos: .userInitiated)
     
-    private let defaultTimeout: TimeInterval = 5.0
+    private let defaultTimeout: TimeInterval = 30.0 // Aumentado para debugging
     private let defaultPort: UInt16 = 8080
     
     // MARK: - Initialization
@@ -31,41 +31,31 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     
     // MARK: - Public Methods
     @objc public func connect(_ call: CAPPluginCall) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else {
-                call.reject("Server instance deallocated")
-                return
-            }
+        // Stop existing server if running
+        self.disconnect()
+        
+        self.webServer = HttpServer()
+        self.setupHandlers()
+        
+        do {
+            try self.startServer()
+            let ip = Self.getWiFiAddress() ?? "127.0.0.1"
             
-            // Stop existing server if running
-            self.disconnect()
+            print("✅ HttpLocalServerSwifter: Server started on \(ip):\(self.defaultPort)")
             
-            self.webServer = HttpServer()
-            self.setupHandlers()
-            
-            do {
-                try self.startServer()
-                let ip = Self.getWiFiAddress() ?? "127.0.0.1"
-                call.resolve([
-                    "ip": ip,
-                    "port": self.defaultPort
-                ])
-            } catch {
-                call.reject("Failed to start server: \(error.localizedDescription)")
-            }
+            call.resolve([
+                "ip": ip,
+                "port": self.defaultPort
+            ])
+        } catch {
+            print("❌ HttpLocalServerSwifter: Failed to start server - \(error.localizedDescription)")
+            call.reject("Failed to start server: \(error.localizedDescription)")
         }
     }
     
     @objc public func disconnect(_ call: CAPPluginCall? = nil) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else {
-                call?.reject("Server instance deallocated")
-                return
-            }
-            
-            self.disconnect()
-            call?.resolve()
-        }
+        disconnect()
+        call?.resolve()
     }
     
     // MARK: - Static Methods
@@ -74,6 +64,9 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
             if let callback = pendingResponses[requestId] {
                 callback(body)
                 pendingResponses.removeValue(forKey: requestId)
+                print("✅ HttpLocalServerSwifter: Response sent for requestId: \(requestId)")
+            } else {
+                print("⚠️ HttpLocalServerSwifter: No pending callback for requestId: \(requestId)")
             }
         }
     }
@@ -87,24 +80,36 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
         Self.queue.async {
             Self.pendingResponses.removeAll()
         }
+        
+        print("🛑 HttpLocalServerSwifter: Server stopped")
     }
     
     private func setupHandlers() {
         guard let server = webServer else { return }
         
-        // Catch-all handler for all HTTP methods and paths
-        server["/(.*)"] = { [weak self] request in
-            guard let self = self else {
-                return self?.errorResponse() ?? .internalServerError
-            }
-            
-            // Handle OPTIONS (CORS preflight)
-            if request.method == "OPTIONS" {
-                return self.corsResponse()
-            }
-            
-            return self.processRequest(request)
+        // Handler específico para la raíz
+        server["/"] = { [weak self] request in
+            return self?.handleRequest(request) ?? self?.errorResponse() ?? .internalServerError
         }
+        
+        // Catch-all handler para todas las rutas
+        server["/:path"] = { [weak self] request in
+            return self?.handleRequest(request) ?? self?.errorResponse() ?? .internalServerError
+        }
+        
+        print("✅ HttpLocalServerSwifter: Handlers configured")
+    }
+    
+    private func handleRequest(_ request: HttpRequest) -> HttpResponse {
+        print("📨 HttpLocalServerSwifter: Received \(request.method) request to \(request.path)")
+        
+        // Handle OPTIONS (CORS preflight)
+        if request.method == "OPTIONS" {
+            print("🔄 HttpLocalServerSwifter: Handling CORS preflight")
+            return corsResponse()
+        }
+        
+        return processRequest(request)
     }
     
     private func processRequest(_ request: HttpRequest) -> HttpResponse {
@@ -147,7 +152,12 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
             requestData["query"] = query
         }
         
-        delegate?.httpLocalServerSwifterDidReceiveRequest(requestData)
+        print("📤 HttpLocalServerSwifter: Notifying delegate with requestId: \(requestId)")
+        
+        // Notify on main thread to ensure proper event delivery
+        DispatchQueue.main.async { [weak self] in
+            self?.delegate?.httpLocalServerSwifterDidReceiveRequest(requestData)
+        }
         
         // Wait for JS response or timeout
         let result = semaphore.wait(timeout: .now() + defaultTimeout)
@@ -159,16 +169,17 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
         
         // Handle timeout
         if result == .timedOut {
+            print("⏱️ HttpLocalServerSwifter: Request timeout for requestId: \(requestId)")
             let timeoutResponse = "{\"error\":\"Request timeout\",\"requestId\":\"\(requestId)\"}"
             return createJsonResponse(timeoutResponse, statusCode: 408)
         }
         
         let reply = responseString ?? "{\"error\":\"No response from handler\"}"
+        print("✅ HttpLocalServerSwifter: Sending response for requestId: \(requestId)")
         return createJsonResponse(reply)
     }
     
     private func extractBody(from request: HttpRequest) -> String? {
-        // request.body ya es [UInt8], no es opcional
         let bodyBytes = request.body
     
         guard !bodyBytes.isEmpty else {
@@ -179,7 +190,6 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     }
     
     private func extractHeaders(from request: HttpRequest) -> [String: String] {
-        // Swifter headers es [(String, String)], convertir a [String: String]
         var headersDict: [String: String] = [:]
         for (key, value) in request.headers {
             headersDict[key] = value
@@ -188,7 +198,6 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     }
     
     private func extractQuery(from request: HttpRequest) -> [String: String] {
-    // request.queryParams también es [(String, String)]
         var queryDict: [String: String] = [:]
         for (key, value) in request.queryParams {
             queryDict[key] = value
@@ -254,8 +263,14 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
             )
         }
         
-        // Swifter starts on all interfaces (0.0.0.0) by default
-        try server.start(defaultPort, forceIPv4: true)
+        // Try to start on the default port
+        do {
+            try server.start(defaultPort, forceIPv4: true)
+            print("✅ HttpLocalServerSwifter: Server listening on port \(defaultPort)")
+        } catch {
+            print("❌ HttpLocalServerSwifter: Failed to bind to port \(defaultPort): \(error)")
+            throw error
+        }
     }
     
     // MARK: - Network Utilities
@@ -264,6 +279,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         
         guard getifaddrs(&ifaddr) == 0 else {
+            print("❌ HttpLocalServerSwifter: Failed to get network interfaces")
             return nil
         }
         
@@ -303,6 +319,8 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
             guard result == 0 else { continue }
             
             address = String(cString: hostname)
+            
+            print("📡 HttpLocalServerSwifter: Found \(name) interface with IP: \(address ?? "unknown")")
             
             // Prefer en0 (WiFi) over pdp_ip0 (cellular)
             if name == "en0" {
