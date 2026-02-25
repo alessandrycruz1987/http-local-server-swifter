@@ -2,37 +2,16 @@ import { registerPlugin } from '@capacitor/core';
 import type { HttpLocalServerSwifterPlugin } from './definitions';
 
 /**
- * Plugin de servidor HTTP local para Android e iOS.
- * 
- * Permite crear un servidor HTTP en el dispositivo que puede recibir
- * peticiones desde otros dispositivos en la misma red local.
- * 
- * @example
- * ```typescript
- * import { HttpLocalServerSwifter } from '@cappitolian/http-local-server-swifter';
- * 
- * // Iniciar servidor
- * const { ip, port } = await HttpLocalServerSwifter.connect();
- * console.log(`Servidor en http://${ip}:${port}`);
- * 
- * // Escuchar peticiones
- * await HttpLocalServerSwifter.addListener('onRequest', async (data) => {
- *   console.log('Petición recibida:', data);
- *   
- *   // Procesar y responder
- *   await HttpLocalServerSwifter.sendResponse({
- *     requestId: data.requestId,
- *     body: JSON.stringify({ success: true })
- *   });
- * });
- * 
- * // Detener servidor
- * await HttpLocalServerSwifter.disconnect();
- * ```
+ * Local HTTP server plugin for Android and iOS.
+ * * Allows creating an HTTP server on the device that can receive
+ * requests from other devices on the same local network or 
+ * from the app's own WebView (fixing CORS issues).
  */
 const HttpLocalServerSwifter = registerPlugin<HttpLocalServerSwifterPlugin>('HttpLocalServerSwifter', {
+  // We point to the web mock for browser development
   web: () => import('./web').then(m => new m.HttpLocalServerSwifterWeb()),
 });
 
+// Re-export everything from definitions so they are available to the app
 export * from './definitions';
 export { HttpLocalServerSwifter };

@@ -27,26 +27,20 @@ import java.util.concurrent.TimeoutException;
 
 import fi.iki.elonen.NanoHTTPD;
 
-/**
-* Local HTTP server implementation for Android using NanoHTTPD.
-* Handles incoming HTTP requests and communicates with JavaScript layer.
-*/
 public class HttpLocalServerSwifter {
-    // MARK: - Constants
     private static final String TAG = "HttpLocalServerSwifter";
     private static final int DEFAULT_PORT = 8080;
     private static final int DEFAULT_TIMEOUT_SECONDS = 5;
     private static final String FALLBACK_IP = "127.0.0.1";
     
-    // MARK: - Properties
     private LocalNanoServer server;
     private final Plugin plugin;
     private final int port;
     private final int timeoutSeconds;
     
+    // Changed to String to transport the full JSON response from JS
     private static final ConcurrentHashMap<String, CompletableFuture<String>> pendingResponses = new ConcurrentHashMap<>();
     
-    // MARK: - Constructor
     public HttpLocalServerSwifter(@NonNull Plugin plugin) {
         this(plugin, DEFAULT_PORT, DEFAULT_TIMEOUT_SECONDS);
     }
@@ -57,7 +51,6 @@ public class HttpLocalServerSwifter {
         this.timeoutSeconds = timeoutSeconds;
     }
     
-    // MARK: - Public Methods
     public void connect(@NonNull PluginCall call) {
         if (server != null && server.isAlive()) {
             call.reject("Server is already running");
@@ -85,72 +78,37 @@ public class HttpLocalServerSwifter {
         if (server != null) {
             server.stop();
             server = null;
-            
-            // Clear all pending responses
             pendingResponses.clear();
-            
             Log.i(TAG, "Server stopped");
         }
-        
-        if (call != null) {
-            call.resolve();
-        }
+        if (call != null) call.resolve();
     }
     
-    // MARK: - Static Methods
     /**
-    * Called by plugin when JavaScript responds to a request
-    */
-    public static void handleJsResponse(@NonNull String requestId, @NonNull String body) {
+     * Completes the future with the full JS response object (body, status, headers)
+     */
+    public static void handleJsResponse(@NonNull String requestId, @NonNull JSObject responseData) {
         CompletableFuture<String> future = pendingResponses.remove(requestId);
         if (future != null && !future.isDone()) {
-            future.complete(body);
-            Log.d(TAG, "Response received for request: " + requestId);
-        } else {
-            Log.w(TAG, "No pending request found for ID: " + requestId);
+            future.complete(responseData.toString());
+            Log.d(TAG, "Response object delivered to future for ID: " + requestId);
         }
     }
-    
-    // MARK: - Private Methods
-    /**
-    * Get the local WiFi IP address
-    */
-    @NonNull
-    private String getLocalIpAddress(@NonNull Context context) {
+
+    private @NonNull String getLocalIpAddress(@NonNull Context context) {
         try {
-            WifiManager wifiManager = (WifiManager) context.getApplicationContext()
-                    .getSystemService(Context.WIFI_SERVICE);
-            
-            if (wifiManager == null) {
-                Log.w(TAG, "WifiManager is null, using fallback IP");
-                return FALLBACK_IP;
-            }
-            
+            WifiManager wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager == null) return FALLBACK_IP;
             WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-            if (wifiInfo == null) {
-                Log.w(TAG, "WifiInfo is null, using fallback IP");
-                return FALLBACK_IP;
-            }
-            
+            if (wifiInfo == null) return FALLBACK_IP;
             int ipAddress = wifiInfo.getIpAddress();
-            if (ipAddress == 0) {
-                Log.w(TAG, "IP address is 0, using fallback IP");
-                return FALLBACK_IP;
-            }
-            
-            return Formatter.formatIpAddress(ipAddress);
+            return ipAddress == 0 ? FALLBACK_IP : Formatter.formatIpAddress(ipAddress);
         } catch (Exception e) {
-            Log.e(TAG, "Error getting IP address", e);
             return FALLBACK_IP;
         }
     }
-    
-    // MARK: - Inner Class: LocalNanoServer
-    /**
-    * NanoHTTPD server implementation that handles HTTP requests
-    */
+
     private static class LocalNanoServer extends NanoHTTPD {
-        
         private final Plugin plugin;
         private final int timeoutSeconds;
         
@@ -162,204 +120,109 @@ public class HttpLocalServerSwifter {
         
         @Override
         public Response serve(@NonNull IHTTPSession session) {
-            String method = session.getMethod().name();
-            String path = session.getUri();
-            
-            // Handle CORS preflight
+            // Native CORS Preflight handling for efficiency
             if (Method.OPTIONS.equals(session.getMethod())) {
                 return createCorsResponse();
             }
             
             try {
-                // Extract request data
+                String method = session.getMethod().name();
+                String path = session.getUri();
                 String body = extractBody(session);
                 Map<String, String> headers = session.getHeaders();
                 Map<String, String> params = session.getParms();
                 
-                // Process request
-                String responseBody = processRequest(method, path, body, headers, params);
-                
-                return createJsonResponse(responseBody, Response.Status.OK);
+                // Wait for TypeScript to process logic and provide the complex response
+                String jsResponseRaw = processRequest(method, path, body, headers, params);
+                return createDynamicResponse(jsResponseRaw);
             } catch (Exception e) {
-                Log.e(TAG, "Error processing request", e);
-                return createErrorResponse("Internal server error: " + e.getMessage(), 
-                        Response.Status.INTERNAL_ERROR);
+                return createErrorResponse("Internal server error: " + e.getMessage(), Response.Status.INTERNAL_ERROR);
             }
         }
-        
+
         /**
-        * Extract body from POST/PUT/PATCH requests
-        */
-        @Nullable
+         * Parses the JSON from JS and builds a NanoHTTPD Response with custom status and headers
+         */
+        private Response createDynamicResponse(String jsResponseRaw) {
+            try {
+                JSONObject res = new JSONObject(jsResponseRaw);
+                String body = res.optString("body", "");
+                int statusCode = res.optInt("status", 200);
+                JSONObject customHeaders = res.optJSONObject("headers");
+
+                Response.IStatus status = Response.Status.lookup(statusCode);
+                Response response = newFixedLengthResponse(status != null ? status : Response.Status.OK, "application/json", body);
+                
+                // Add standard CORS headers
+                addCorsHeaders(response);
+
+                // Inject custom headers from TypeScript (allows overriding CORS or Content-Type)
+                if (customHeaders != null) {
+                    java.util.Iterator<String> keys = customHeaders.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        response.addHeader(key, customHeaders.getString(key));
+                    }
+                }
+                return response;
+            } catch (Exception e) {
+                // Fallback for simple string responses or parsing errors
+                return newFixedLengthResponse(Response.Status.OK, "application/json", jsResponseRaw);
+            }
+        }
+
         private String extractBody(@NonNull IHTTPSession session) {
             Method method = session.getMethod();
-            
-            if (method != Method.POST && method != Method.PUT && method != Method.PATCH) {
-                return null;
-            }
-            
+            if (method != Method.POST && method != Method.PUT && method != Method.PATCH) return null;
             try {
                 HashMap<String, String> files = new HashMap<>();
                 session.parseBody(files);
-                
-                // Body comes in the map with key "postData"
                 String body = files.get("postData");
-                
-                // Fallback to query parameters for form-data
-                if (body == null || body.isEmpty()) {
-                    body = session.getQueryParameterString();
-                }
-                
-                Log.d(TAG, "Body received (" + body.length() + " bytes): " + 
-                        (body != null ? body.substring(0, Math.min(body.length(), 100)) : "null"));
-                
-                return body;
+                return (body == null || body.isEmpty()) ? session.getQueryParameterString() : body;
             } catch (IOException | ResponseException e) {
-                Log.e(TAG, "Error parsing body", e);
                 return null;
             }
         }
         
-        /**
-        * Process the request and wait for JavaScript response
-        */
-        @NonNull
-        private String processRequest(@NonNull String method, @NonNull String path, 
-                                      @Nullable String body, @NonNull Map<String, String> headers,
-                                      @NonNull Map<String, String> params) {
-            
+        private String processRequest(String method, String path, String body, Map<String, String> headers, Map<String, String> params) {
             String requestId = UUID.randomUUID().toString();
-            
-            // Build request data for JavaScript
             JSObject requestData = new JSObject();
             requestData.put("requestId", requestId);
             requestData.put("method", method);
             requestData.put("path", path);
+            if (body != null) requestData.put("body", body);
             
-            if (body != null && !body.isEmpty()) {
-                requestData.put("body", body);
-            }
-            
-            if (!headers.isEmpty()) {
-                requestData.put("headers", mapToJson(headers));
-            }
-            
-            if (!params.isEmpty()) {
-                requestData.put("query", mapToJson(params));
-            }
-            
-            // Create future for response
             CompletableFuture<String> future = new CompletableFuture<>();
             pendingResponses.put(requestId, future);
             
-            // Notify plugin
             if (plugin instanceof HttpLocalServerSwifterPlugin) {
                 ((HttpLocalServerSwifterPlugin) plugin).fireOnRequest(requestData);
-            } else {
-                Log.e(TAG, "Plugin is not instance of HttpLocalServerSwifterPlugin");
             }
             
-            // Wait for JavaScript response
             try {
-                String response = future.get(timeoutSeconds, TimeUnit.SECONDS);
-                Log.d(TAG, "Response received for request: " + requestId);
-                return response;
-            } catch (TimeoutException e) {
-                Log.w(TAG, "Timeout waiting for response: " + requestId);
-                return createTimeoutError(requestId);
+                return future.get(timeoutSeconds, TimeUnit.SECONDS);
             } catch (Exception e) {
-                Log.e(TAG, "Error waiting for response: " + requestId, e);
-                return createGenericError("Error waiting for response");
+                return "{\"error\":\"Timeout or processing error\"}";
             } finally {
                 pendingResponses.remove(requestId);
             }
         }
-        
-        /**
-        * Convert Map to JSObject
-        */
-        @NonNull
-        private JSObject mapToJson(@NonNull Map<String, String> map) {
-            JSObject json = new JSObject();
-            for (Map.Entry<String, String> entry : map.entrySet()) {
-                json.put(entry.getKey(), entry.getValue());
-            }
-            return json;
-        }
-        
-        /**
-        * Create JSON response with CORS headers
-        */
-        @NonNull
-        private Response createJsonResponse(@NonNull String body, @NonNull Response.Status status) {
-            Response response = newFixedLengthResponse(status, "application/json", body);
-            addCorsHeaders(response);
-            return response;
-        }
-        
-        /**
-        * Create CORS preflight response
-        */
-        @NonNull
+
         private Response createCorsResponse() {
-            Response response = newFixedLengthResponse(Response.Status.NO_CONTENT, 
-                    "text/plain", "");
+            Response response = newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", "");
             addCorsHeaders(response);
             return response;
         }
-        
-        /**
-        * Create error response
-        */
-        @NonNull
-        private Response createErrorResponse(@NonNull String message, @NonNull Response.Status status) {
-            try {
-                JSONObject error = new JSONObject();
-                error.put("error", message);
-                return createJsonResponse(error.toString(), status);
-            } catch (JSONException e) {
-                return newFixedLengthResponse(status, "text/plain", message);
-            }
-        }
-        
-        /**
-        * Create timeout error JSON
-        */
-        @NonNull
-        private String createTimeoutError(@NonNull String requestId) {
-            try {
-                JSONObject error = new JSONObject();
-                error.put("error", "Request timeout");
-                error.put("requestId", requestId);
-                return error.toString();
-            } catch (JSONException e) {
-                return "{\"error\":\"Request timeout\"}";
-            }
-        }
-        
-        /**
-        * Create generic error JSON
-        */
-        @NonNull
-        private String createGenericError(@NonNull String message) {
-            try {
-                JSONObject error = new JSONObject();
-                error.put("error", message);
-                return error.toString();
-            } catch (JSONException e) {
-                return "{\"error\":\"" + message + "\"}";
-            }
-        }
-        
-        /**
-        * Add CORS headers to response
-        */
+
         private void addCorsHeaders(@NonNull Response response) {
             response.addHeader("Access-Control-Allow-Origin", "*");
             response.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-            response.addHeader("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization");
-            response.addHeader("Access-Control-Allow-Credentials", "true");
+            response.addHeader("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With");
             response.addHeader("Access-Control-Max-Age", "3600");
+        }
+
+        private Response createErrorResponse(String message, Response.Status status) {
+            return newFixedLengthResponse(status, "application/json", "{\"error\":\"" + message + "\"}");
         }
     }
 }
