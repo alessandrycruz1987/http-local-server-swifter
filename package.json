@@ -1,6 +1,6 @@
 {
   "name": "@cappitolian/http-local-server-swifter",
-  "version": "0.0.17",
+  "version": "0.0.26",
   "description": "Runs a local HTTP server on your device, accessible over LAN. Supports connect, disconnect, GET, and POST methods with IP and port discovery.",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
