@@ -219,6 +219,9 @@ public class HttpLocalServerSwifter {
             response.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
             response.addHeader("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With");
             response.addHeader("Access-Control-Max-Age", "3600");
+            // Prevents TCP connection reuse. NanoHTTPD does not handle keep-alive
+            // correctly under rapid sequential requests, causing ERR_INVALID_HTTP_RESPONSE.
+            response.addHeader("Connection", "close");
         }
 
         private Response createErrorResponse(String message, Response.Status status) {
