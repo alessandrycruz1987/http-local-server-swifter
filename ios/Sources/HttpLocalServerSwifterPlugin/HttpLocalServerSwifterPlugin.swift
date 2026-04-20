@@ -3,6 +3,10 @@ import Capacitor
 
 @objc(HttpLocalServerSwifterPlugin)
 public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLocalServerSwifterDelegate {
+    // Private properties
+    private var localServer: HttpLocalServerSwifter?
+
+    // Publi properties
     public let identifier   = "HttpLocalServerSwifterPlugin"
     public let jsName       = "HttpLocalServerSwifter"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -11,14 +15,13 @@ public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLoca
         CAPPluginMethod(name: "sendResponse", returnType: CAPPluginReturnPromise)
     ]
 
-    private var localServer: HttpLocalServerSwifter?
-
     // MARK: - Plugin methods
 
     @objc func connect(_ call: CAPPluginCall) {
         if localServer == nil {
             localServer = HttpLocalServerSwifter(delegate: self)
         }
+
         localServer?.connect(call)
     }
 
@@ -32,6 +35,7 @@ public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLoca
     @objc func sendResponse(_ call: CAPPluginCall) {
         guard let requestId = call.getString("requestId"), !requestId.isEmpty else {
             call.reject("Missing requestId")
+
             return
         }
 
@@ -41,6 +45,7 @@ public class HttpLocalServerSwifterPlugin: CAPPlugin, CAPBridgedPlugin, HttpLoca
             requestId:    requestId,
             responseData: responseData
         )
+        
         call.resolve()
     }
 

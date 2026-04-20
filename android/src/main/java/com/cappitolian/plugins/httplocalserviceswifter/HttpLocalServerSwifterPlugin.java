@@ -29,14 +29,17 @@ public class HttpLocalServerSwifterPlugin extends Plugin {
     @PluginMethod
     public void sendResponse(PluginCall call) {
         String requestId = call.getString("requestId");
+
         if (requestId == null || requestId.isEmpty()) {
             call.reject("Missing requestId");
+            
             return;
         }
-        
+
         // Pass the entire PluginCall data object to handleJsResponse
         // This allows us to capture 'status' and 'headers' along with the 'body'
         HttpLocalServerSwifter.handleJsResponse(requestId, call.getData());
+        
         call.resolve();
     }
 

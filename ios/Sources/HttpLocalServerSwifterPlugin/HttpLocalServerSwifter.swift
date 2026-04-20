@@ -7,20 +7,43 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
 }
 
 @objc public class HttpLocalServerSwifter: NSObject {
-    private var webServer: HttpServer?
-    private weak var delegate: HttpLocalServerSwifterDelegate?
-
+    // Private static properties
     private static var pendingResponses = [String: (String) -> Void]()
     private static let queue = DispatchQueue(
         label: "com.cappitolian.HttpLocalServerSwifter.pendingResponses",
         qos: .userInitiated
     )
 
+    // Private properties
+    private var webServer: HttpServer?
+    private weak var delegate: HttpLocalServerSwifterDelegate?
     private let defaultTimeout: TimeInterval = 10.0
     private let defaultPort: UInt16 = 8080
 
+    private var rateLimitMap = [String: (start: Date, count: Int)]()
+    private let rateLimitQueue = DispatchQueue(label: "rateLimit", qos: .userInitiated)
+    private let rateLimit = 30
+    private let rateWindowSeconds: TimeInterval = 60
+
+    private func isRateLimited(ip: String) -> Bool {
+        return rateLimitQueue.sync {
+            let now = Date()
+
+            if let entry = rateLimitMap[ip], now.timeIntervalSince(entry.start) < rateWindowSeconds {
+                if entry.count >= rateLimit { return true }
+
+                rateLimitMap[ip] = (entry.start, entry.count + 1)
+            } else {
+                rateLimitMap[ip] = (now, 1)
+            }
+
+            return false
+        }
+    }
+
     public init(delegate: HttpLocalServerSwifterDelegate) {
         self.delegate = delegate
+
         super.init()
     }
 
@@ -33,6 +56,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
             self.stopServer()
 
             let server = HttpServer()
+            
             self.webServer = server
 
             server.middleware.append { [weak self] request in
@@ -41,11 +65,13 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
                 if request.method == "OPTIONS" {
                     return self.corsResponse()
                 }
+
                 return self.processRequest(request)
             }
 
             do {
                 try server.start(self.defaultPort, forceIPv4: true)
+
                 let ip = Self.getWiFiAddress() ?? "127.0.0.1"
 
                 print("🚀 SWIFTER: Server running on http://\(ip):\(self.defaultPort)")
@@ -56,6 +82,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
                 ])
             } catch {
                 print("❌ SWIFTER ERROR: \(error)")
+
                 call.reject("Could not start server: \(error.localizedDescription)")
             }
         }
@@ -65,6 +92,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     @objc public func stopServer() {
         webServer?.stop()
         webServer = nil
+
         // Drain pending futures so blocked threads can unblock on their semaphore timeout.
         Self.queue.sync { Self.pendingResponses.removeAll() }
     }
@@ -72,6 +100,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     /// Stops the server and resolves the Capacitor call.
     @objc public func disconnect(resolving call: CAPPluginCall) {
         stopServer()
+
         call.resolve()
     }
 
@@ -96,6 +125,18 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
     // MARK: - Request processing
 
     private func processRequest(_ request: HttpRequest) -> HttpResponse {
+        let clientIp = request.headers["x-forwarded-for"] ?? 
+                   request.address ?? "unknown"
+    
+        if isRateLimited(ip: clientIp) {
+            return .raw(429, "Too Many Requests", [
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            ]) { writer in
+                try writer.write([UInt8](#"{"success":false,"error":"Too many requests"}"#.utf8))
+            }
+        }
+
         let requestId = UUID().uuidString
 
         // Use a protected local variable written only inside `queue.sync` inside
@@ -184,12 +225,15 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
         defer { freeifaddrs(ifaddr) }
 
         var ptr = ifaddr
+
         while let current = ptr {
             let interface = current.pointee
+
             if interface.ifa_addr.pointee.sa_family == UInt8(AF_INET),
                String(cString: interface.ifa_name) == "en0"
             {
                 var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+
                 getnameinfo(
                     interface.ifa_addr,
                     socklen_t(interface.ifa_addr.pointee.sa_len),
@@ -198,9 +242,12 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
                     nil, 0,
                     NI_NUMERICHOST
                 )
+
                 address = String(cString: hostname)
+
                 break
             }
+
             ptr = interface.ifa_next
         }
 
