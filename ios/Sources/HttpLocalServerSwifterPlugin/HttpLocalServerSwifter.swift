@@ -186,7 +186,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
             "Content-Type":                     "application/json",
             "Access-Control-Allow-Origin":      "*",
             "Access-Control-Allow-Methods":     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers":     "Origin, Content-Type, Accept, Authorization, X-Requested-With"
+            "Access-Control-Allow-Headers":     "Origin, Content-Type, Accept, Authorization, X-Requested-With, x-api-key"
         ]
 
         if
@@ -210,7 +210,7 @@ public protocol HttpLocalServerSwifterDelegate: AnyObject {
         return .raw(204, "No Content", [
             "Access-Control-Allow-Origin":  "*",
             "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Origin, Content-Type, Accept, Authorization, X-Requested-With",
+            "Access-Control-Allow-Headers": "Origin, Content-Type, Accept, Authorization, X-Requested-With, x-api-key",
             "Access-Control-Max-Age":       "86400"
         ], nil)
     }

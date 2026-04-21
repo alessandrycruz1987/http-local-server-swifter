@@ -267,6 +267,15 @@ public class HttpLocalServerSwifter {
             if (body != null)
                 requestData.put("body", body);
 
+            // Add headers
+            JSObject headersObj = new JSObject();
+
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                headersObj.put(entry.getKey(), entry.getValue());
+            }
+
+            requestData.put("headers", headersObj);
+
             CompletableFuture<String> future = new CompletableFuture<>();
             pendingResponses.put(requestId, future);
 
@@ -295,7 +304,7 @@ public class HttpLocalServerSwifter {
             response.addHeader("Access-Control-Allow-Origin", "*");
             response.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
             response.addHeader("Access-Control-Allow-Headers",
-                    "Origin, Content-Type, Accept, Authorization, X-Requested-With");
+                    "Origin, Content-Type, Accept, Authorization, X-Requested-With, x-api-key");
             response.addHeader("Access-Control-Max-Age", "3600");
             // Prevents TCP connection reuse. NanoHTTPD does not handle keep-alive
             // correctly under rapid sequential requests, causing ERR_INVALID_HTTP_RESPONSE.
